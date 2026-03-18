@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CYFSA Document Analyzer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/docx/8.5.0/docx.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+:root{
+  --bg:#0a0c0f;--surface:#111318;--surface2:#181c23;--border:#1e2530;--bb:#2a3444;
+  --red:#ff3b3b;--amber:#ffb020;--green:#22c55e;--blue:#3b82f6;
+  --text:#e2e8f0;--dim:#64748b;--mid:#94a3b8;
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.025) 2px,rgba(0,0,0,.025) 4px);pointer-events:none;z-index:9999}
+
+/* HEADER */
+header{border-bottom:1px solid var(--border);padding:13px 22px;display:flex;align-items:center;gap:13px;background:var(--surface);position:sticky;top:0;z-index:100}
+.licon{width:30px;height:30px;background:var(--red);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.ltxt{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.1em}
+.lsub{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.15em;text-transform:uppercase}
+.spill{margin-left:auto;display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* LAYOUT */
+main{max-width:1200px;margin:0 auto;padding:24px 18px;display:grid;grid-template-columns:400px 1fr;gap:16px}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:4px;overflow:hidden}
+.ph{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);display:flex;align-items:center;gap:8px}
+.pt{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mid)}
+.pb{margin-left:auto;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:2px;background:var(--border);color:var(--dim)}
+
+/* UPLOAD */
+.uzone{margin:13px;border:2px dashed var(--bb);border-radius:4px;padding:20px 14px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.uzone:hover,.uzone.drag{border-color:var(--red);background:rgba(255,59,59,.05)}
+.uzone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.uicon{font-size:26px;opacity:.45;margin-bottom:7px}
+.utit{font-family:var(--mono);font-size:12px;color:var(--mid);margin-bottom:3px}
+.usub{font-size:11px;color:var(--dim);line-height:1.5}
+.ftags{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-top:9px}
+.ftag{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:2px;border:1px solid var(--bb);color:var(--dim)}
+.ftag.on{border-color:var(--green);color:var(--green);background:rgba(34,197,94,.07)}
+
+/* PROGRESS */
+.pwrap{margin:0 13px 10px;display:none}
+.plbl{font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:4px;display:flex;justify-content:space-between}
+.pbar{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.pfill{height:100%;background:var(--red);border-radius:2px;transition:width .3s}
+
+/* OCR NOTICE */
+.ocrn{margin:0 13px 8px;padding:9px 12px;background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.2);border-radius:3px;font-family:var(--mono);font-size:11px;color:var(--amber);display:none}
+
+/* TEXTAREAS */
+#di{width:100%;height:190px;background:transparent;border:none;border-top:1px solid var(--border);padding:12px 14px;color:var(--text);font-family:var(--mono);font-size:11.5px;line-height:1.7;resize:vertical;outline:none;display:block}
+#di::placeholder{color:var(--dim)}
+#ctx{width:100%;height:65px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:8px 10px;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.6;resize:vertical;outline:none;display:block}
+#ctx::placeholder{color:var(--dim)}
+
+.cbar{padding:4px 14px 9px;font-family:var(--mono);font-size:10px;color:var(--dim);border-top:1px solid var(--border);display:flex;justify-content:space-between}
+
+/* CHIPS */
+.chips{display:flex;flex-wrap:wrap;gap:5px;padding:9px 13px}
+.chip{padding:5px 9px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--dim);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;user-select:none}
+.chip:hover,.chip.on{border-color:var(--red);color:var(--red);background:rgba(255,59,59,.06)}
+
+/* CHECKS */
+.checks{padding:11px 14px;display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border)}
+.cr{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mid);cursor:pointer}
+.cr input{accent-color:var(--red);width:14px;height:14px;flex-shrink:0}
+
+/* CONTEXT WRAP */
+.ctwrap{padding:9px 13px 13px;border-top:1px solid var(--border)}
+.ctlbl{font-family:var(--mono);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px}
+
+/* ANALYZE BTN */
+.abtn{margin:0 13px 13px;width:calc(100% - 26px);padding:12px;background:var(--red);border:none;border-radius:3px;color:#fff;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.abtn:hover:not(:disabled){background:#ff5050;box-shadow:0 4px 18px rgba(255,59,59,.35);transform:translateY(-1px)}
+.abtn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+
+/* OUTPUT */
+.opanel{grid-column:2}
+@media(max-width:860px){.opanel{grid-column:1}}
+.placeholder{padding:55px 28px;text-align:center}
+.placeholder .pi{font-size:40px;opacity:.2;margin-bottom:13px}
+.placeholder h3{font-family:var(--mono);font-size:13px;color:var(--mid);margin-bottom:7px}
+.placeholder p{font-size:12px;color:var(--dim);line-height:1.7;max-width:370px;margin:0 auto}
+
+/* LOADING */
+.loading{padding:48px 28px;text-align:center}
+.sw{width:170px;height:3px;background:var(--border);border-radius:2px;margin:0 auto 18px;overflow:hidden}
+.sf{height:100%;background:linear-gradient(90deg,transparent,var(--red),transparent);animation:sweep 1.1s ease-in-out infinite;width:50%}
+@keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+.ll{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.1em}
+.lss{margin-top:13px;display:flex;flex-direction:column;gap:5px;align-items:center}
+.ls{font-family:var(--mono);font-size:10px;color:var(--dim)}
+.ls.active{color:var(--amber)}.ls.done{color:var(--green)}
+
+/* SUMMARY BAR */
+.sbar{padding:13px 17px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.ss{display:flex;flex-direction:column;gap:2px}
+.sv{font-family:var(--mono);font-size:20px;font-weight:600;line-height:1}
+.sv.c{color:var(--red)}.sv.w{color:var(--amber)}.sv.i{color:var(--blue)}
+.sl{font-family:var(--mono);font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em}
+.sdiv{width:1px;height:26px;background:var(--border)}
+.rbadge{margin-left:auto;padding:6px 12px;border-radius:3px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.rbadge.HIGH{background:rgba(255,59,59,.15);border:1px solid var(--red);color:var(--red)}
+.rbadge.MEDIUM{background:rgba(255,176,32,.15);border:1px solid var(--amber);color:var(--amber)}
+.rbadge.LOW{background:rgba(34,197,94,.15);border:1px solid var(--green);color:var(--green)}
+
+/* EXPORT BAR */
+.ebar{padding:11px 17px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ebtn{padding:7px 13px;border-radius:3px;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:1px solid;transition:all .15s;display:flex;align-items:center;gap:6px;background:none}
+.ebtn.d{border-color:var(--blue);color:var(--blue);background:rgba(59,130,246,.08)}.ebtn.d:hover{background:rgba(59,130,246,.18)}
+.ebtn.t{border-color:var(--dim);color:var(--dim)}.ebtn.t:hover{background:rgba(255,255,255,.05)}
+.enote{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:auto}
+
+/* FLAGS */
+.flist{padding:13px 17px;display:flex;flex-direction:column;gap:10px}
+.slbl{font-family:var(--mono);font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.15em;padding:5px 0 3px;border-bottom:1px solid var(--border);margin-bottom:2px}
+.flag{border-left:3px solid transparent;background:var(--surface2);border:1px solid var(--border);border-radius:3px;overflow:hidden;animation:fu .35s ease forwards;opacity:0}
+@keyframes fu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.flag.CRITICAL{border-left-color:var(--red)!important}.flag.WARNING{border-left-color:var(--amber)!important}.flag.INFO{border-left-color:var(--blue)!important}
+.fh{padding:9px 12px;display:flex;align-items:flex-start;gap:9px}
+.fsev{font-family:var(--mono);font-size:9px;font-weight:600;padding:2px 6px;border-radius:2px;flex-shrink:0;margin-top:2px;letter-spacing:.07em}
+.CRITICAL .fsev{background:rgba(255,59,59,.2);color:var(--red)}.WARNING .fsev{background:rgba(255,176,32,.2);color:var(--amber)}.INFO .fsev{background:rgba(59,130,246,.2);color:var(--blue)}
+.ftit{font-size:13px;font-weight:600;color:var(--text);line-height:1.4;flex:1}
+.fb{padding:0 12px 10px;display:flex;flex-direction:column;gap:7px}
+.frow{display:flex;gap:8px}
+.flbl{font-family:var(--mono);font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;flex-shrink:0;width:70px;padding-top:2px}
+.fval{font-size:12px;color:var(--mid);line-height:1.6;flex:1}
+.fval.act{color:var(--amber);font-weight:500}.fval.leg{color:var(--blue);font-family:var(--mono);font-size:11px}
+.qt{background:rgba(255,255,255,.04);border-left:2px solid var(--bb);padding:5px 9px;font-family:var(--mono);font-size:11px;color:var(--mid);font-style:italic;border-radius:0 2px 2px 0;margin-top:2px}
+
+/* RECS */
+.recs{margin:0 17px 15px;padding:13px;background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);border-radius:3px}
+.rtit{font-family:var(--mono);font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.12em;margin-bottom:9px}
+.rec{display:flex;gap:9px;margin-bottom:7px;font-size:12px;color:var(--mid);line-height:1.5}
+.rn{font-family:var(--mono);font-size:11px;color:var(--green);flex-shrink:0;font-weight:600}
+
+/* MISSING */
+.miss{margin:0 17px 15px;padding:13px;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.2);border-radius:3px}
+.mtit{font-family:var(--mono);font-size:10px;color:var(--blue);text-transform:uppercase;letter-spacing:.12em;margin-bottom:7px}
+.miss p{font-size:12px;color:var(--mid);line-height:1.6}
+.stxt{font-size:12px;color:var(--mid);line-height:1.5;max-width:360px}
+
+/* ERROR */
+.errbox{padding:22px;margin:16px;background:rgba(255,59,59,.06);border:1px solid rgba(255,59,59,.2);border-radius:3px}
+.errtit{font-family:var(--mono);font-size:12px;color:var(--red);margin-bottom:8px}
+.errmsg{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.7}
+
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--bb);border-radius:2px}
+</style>
+</head>
+<body>
+<header>
+  <div class="licon">⚖</div>
+  <div>
+    <div class="ltxt">CYFSA ANALYZER</div>
+    <div class="lsub">Ontario Child Protection · Legal Flag Scanner</div>
+  </div>
+  <div class="spill"><div class="dot"></div><span id="statusLbl">READY</span></div>
+</header>
+
+<main>
+<!-- INPUT PANEL -->
+<div class="panel" style="overflow-y:auto;max-height:calc(100vh - 76px)">
+  <div class="ph"><span class="pt">Input</span><span class="pb" id="charBadge">0 chars</span></div>
+
+  <div class="uzone" id="dz">
+    <input type="file" id="fi" accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.tiff,.bmp,.webp" onchange="handleFile(event)">
+    <div class="uicon">📎</div>
+    <div class="utit">Drop file or click to upload</div>
+    <div class="usub">PDF · DOCX · TXT · Images including scanned documents</div>
+    <div class="ftags">
+      <span class="ftag" id="ft-pdf">PDF</span>
+      <span class="ftag" id="ft-docx">DOCX / DOC</span>
+      <span class="ftag" id="ft-txt">TXT</span>
+      <span class="ftag" id="ft-img">IMAGE / SCAN</span>
+    </div>
+  </div>
+
+  <div class="ocrn" id="ocrn">🔍 Running OCR… please wait</div>
+  <div class="pwrap" id="pw">
+    <div class="plbl"><span id="plbl">Processing…</span><span id="ppct">0%</span></div>
+    <div class="pbar"><div class="pfill" id="pf" style="width:0%"></div></div>
+  </div>
+
+  <textarea id="di" placeholder="Or paste document text directly here…&#10;&#10;CAS notes · Affidavits · Court orders · OCR reports&#10;Supervision plans · CPR · Access schedules · Correspondence" oninput="uc()"></textarea>
+  <div class="cbar">
+    <span id="cc">0 chars</span>
+    <span id="fl" style="color:var(--green);font-size:10px"></span>
+  </div>
+
+  <div class="ph"><span class="pt">Document Type</span></div>
+  <div class="chips">
+    <span class="chip on" onclick="setType(this,'AUTO-DETECT')">Auto-Detect</span>
+    <span class="chip" onclick="setType(this,'CAS NOTES')">CAS Notes</span>
+    <span class="chip" onclick="setType(this,'AFFIDAVIT')">Affidavit</span>
+    <span class="chip" onclick="setType(this,'COURT ORDER')">Court Order</span>
+    <span class="chip" onclick="setType(this,'OCR / ASSESSMENT')">OCR/Assessment</span>
+    <span class="chip" onclick="setType(this,'SUPERVISION PLAN')">Service Plan</span>
+    <span class="chip" onclick="setType(this,'ACCESS SCHEDULE')">Access Schedule</span>
+    <span class="chip" onclick="setType(this,'CORRESPONDENCE')">Correspondence</span>
+    <span class="chip" onclick="setType(this,'CPR')">CPR</span>
+    <span class="chip" onclick="setType(this,'S.79 ASSESSMENT')">S.79 Assessment</span>
+  </div>
+
+  <div class="ph"><span class="pt">Analysis Focus</span></div>
+  <div class="checks">
+    <label class="cr"><input type="checkbox" id="c1" checked> Parental Rights (CYFSA ss.79–89)</label>
+    <label class="cr"><input type="checkbox" id="c2" checked> Procedural &amp; Notice Failures</label>
+    <label class="cr"><input type="checkbox" id="c3" checked> Language Bias &amp; Predetermined Conclusions</label>
+    <label class="cr"><input type="checkbox" id="c4" checked> Evidence Gaps &amp; Unverified Allegations</label>
+    <label class="cr"><input type="checkbox" id="c5" checked> Charter Rights (s.7, s.8, s.15)</label>
+    <label class="cr"><input type="checkbox" id="c6" checked> Timeline Inconsistencies</label>
+    <label class="cr"><input type="checkbox" id="c7" checked> Best Interests Analysis (s.1)</label>
+    <label class="cr"><input type="checkbox" id="c8" checked> Kinship / Least Restrictive Placement</label>
+    <label class="cr"><input type="checkbox" id="c9"> Indigenous Rights (Part X / UNDRIP)</label>
+    <label class="cr"><input type="checkbox" id="c10" checked> Plan of Care / Supervision Violations</label>
+  </div>
+
+  <div class="ctwrap">
+    <div class="ctlbl">Case Context (optional)</div>
+    <textarea id="ctx" placeholder="Child's age, stage of proceedings, what you're challenging…"></textarea>
+  </div>
+
+  <button class="abtn" id="ab" onclick="run()">
+    <span>⚡</span><span id="bl">ANALYZE DOCUMENT</span>
+  </button>
+</div>
+
+<!-- OUTPUT PANEL -->
+<div class="panel opanel" style="overflow-y:auto;max-height:calc(100vh - 76px)">
+  <div class="ph"><span class="pt">Analysis Results</span><span class="pb" id="rb">AWAITING INPUT</span></div>
+  <div id="oc">
+    <div class="placeholder">
+      <div class="pi">📋</div>
+      <h3>NO DOCUMENT LOADED</h3>
+      <p>Upload a PDF, Word doc, image (including scanned documents), or paste text directly. Every flag includes the exact quote, CYFSA section, impact, and action step.</p>
+    </div>
+  </div>
+</div>
+</main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let dtype = 'AUTO-DETECT';
+let lastResult = null;
+let lastFile = '';
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function esc(t) {
+  return String(t || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function setType(el, t) {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+  dtype = t;
+}
+
+function uc() {
+  const t = document.getElementById('di').value;
+  const c = t.length;
+  const w = t.trim() ? t.trim().split(/\s+/).length : 0;
+  document.getElementById('cc').textContent = `${c.toLocaleString()} chars · ${w.toLocaleString()} words`;
+  document.getElementById('charBadge').textContent = `${c.toLocaleString()} chars`;
+}
+
+function sp(show, lbl, pct) {
+  const pw = document.getElementById('pw');
+  pw.style.display = show ? 'block' : 'none';
+  if (show) {
+    document.getElementById('plbl').textContent = lbl;
+    document.getElementById('ppct').textContent = pct + '%';
+    document.getElementById('pf').style.width = pct + '%';
+  }
+}
+
+function hf(ext) {
+  ['pdf','docx','txt','img'].forEach(f => document.getElementById('ft-' + f)?.classList.remove('on'));
+  const m = {pdf:'ft-pdf',docx:'ft-docx',doc:'ft-docx',txt:'ft-txt',
+             png:'ft-img',jpg:'ft-img',jpeg:'ft-img',tiff:'ft-img',bmp:'ft-img',webp:'ft-img'};
+  if (m[ext]) document.getElementById(m[ext])?.classList.add('on');
+}
+
+function getFocus() {
+  const m = {
+    c1:'Parental rights violations CYFSA ss.79-89: notice, participation, information, counsel',
+    c2:'Procedural failures: improper notice, missed timelines, failure to serve, mandatory hearing deadlines',
+    c3:'Language bias: loaded terms, subjective claims as fact, minimizing positives, predetermined conclusions, circular reasoning',
+    c4:'Unverified allegations as fact, hearsay, vague claims, no corroboration, unsubstantiated risk',
+    c5:'Charter: s.7 liberty/security, s.8 unreasonable search (home visits), s.15 equality (race/disability/poverty)',
+    c6:'Timeline inconsistencies, unexplained gaps, contradictory dates, missed CAS deadlines',
+    c7:'Best interests failures s.1: factors missing, child\'s voice absent, family bonds ignored',
+    c8:'Kinship/least restrictive not explored, family placement preference ignored s.74(3)',
+    c9:'Indigenous rights Part X, Band not notified, customary care ignored, UNDRIP obligations',
+    c10:'Plan of care violations: unreasonable conditions, unclear expectations, no support services'
+  };
+  return Object.entries(m)
+    .filter(([id]) => document.getElementById(id)?.checked)
+    .map(([, v]) => v);
+}
+
+// ── FILE HANDLING ─────────────────────────────────────────────────────────────
+async function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  lastFile = file.name;
+  const ext = file.name.split('.').pop().toLowerCase();
+  hf(ext);
+  document.getElementById('fl').textContent = '✓ ' + file.name;
+  document.getElementById('statusLbl').textContent = 'PROCESSING';
+  try {
+    if (ext === 'txt') {
+      sp(true, 'Reading text…', 50);
+      document.getElementById('di').value = await file.text();
+      sp(false);
+
+    } else if (ext === 'pdf') {
+      sp(true, 'Loading PDF…', 10);
+      const ab = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+      let txt = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        sp(true, `Reading page ${i}/${pdf.numPages}…`, Math.round(i / pdf.numPages * 85));
+        const pg = await pdf.getPage(i);
+        const c = await pg.getTextContent();
+        txt += `\n--- PAGE ${i} ---\n` + c.items.map(x => x.str).join(' ');
+      }
+      sp(false);
+      if (txt.trim().length < 80) {
+        // Scanned PDF — need second arrayBuffer read (first was consumed)
+        const ab2 = await file.arrayBuffer();
+        const pdf2 = await pdfjsLib.getDocument({ data: ab2 }).promise;
+        await ocrPdf(pdf2);
+      } else {
+        document.getElementById('di').value = txt.trim();
+      }
+
+    } else if (ext === 'docx' || ext === 'doc') {
+      sp(true, 'Extracting Word doc…', 40);
+      const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+      document.getElementById('di').value = r.value;
+      sp(false);
+
+    } else if (['png','jpg','jpeg','tiff','bmp','webp'].includes(ext)) {
+      await ocrImg(file);
+
+    } else {
+      alert('Unsupported format. Use PDF, DOCX, TXT, PNG, or JPG.');
+    }
+  } catch (err) {
+    sp(false);
+    document.getElementById('fl').textContent = '⚠ ' + err.message;
+    console.error('File error:', err);
+  }
+  uc();
+  document.getElementById('statusLbl').textContent = 'READY';
+}
+
+// ── OCR ───────────────────────────────────────────────────────────────────────
+async function ocrImg(file) {
+  const ocrn = document.getElementById('ocrn');
+  ocrn.style.display = 'block';
+  ocrn.textContent = '🔍 Running OCR on image… 15–30 seconds';
+  sp(true, 'OCR starting…', 5);
+  try {
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text')
+          sp(true, 'OCR in progress…', Math.round(5 + m.progress * 90));
+      }
+    });
+    const { data: { text } } = await worker.recognize(file);
+    await worker.terminate();
+    document.getElementById('di').value = text;
+  } finally {
+    ocrn.style.display = 'none';
+    sp(false);
+  }
+}
+
+async function ocrPdf(pdf) {
+  const ocrn = document.getElementById('ocrn');
+  ocrn.style.display = 'block';
+  let full = '';
+  try {
+    for (let i = 1; i <= pdf.numPages; i++) {
+      ocrn.textContent = `🔍 OCR scanned PDF — page ${i}/${pdf.numPages}…`;
+      sp(true, `OCR page ${i}/${pdf.numPages}…`, Math.round(i / pdf.numPages * 90));
+      const pg = await pdf.getPage(i);
+      const vp = pg.getViewport({ scale: 2 });
+      const cv = document.createElement('canvas');
+      cv.width = vp.width; cv.height = vp.height;
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+      const w = await Tesseract.createWorker('eng');
+      const { data: { text } } = await w.recognize(blob);
+      await w.terminate();
+      full += `\n--- PAGE ${i} ---\n` + text;
+    }
+    document.getElementById('di').value = full.trim();
+  } finally {
+    ocrn.style.display = 'none';
+    sp(false);
+  }
+}
+
+// ── DRAG & DROP ───────────────────────────────────────────────────────────────
+const dz = document.getElementById('dz');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile({ target: { files: e.dataTransfer.files } });
+});
+
+// ── ANALYZE ───────────────────────────────────────────────────────────────────
+async function run() {
+  const text = document.getElementById('di').value.trim();
+  if (!text) { alert('Please upload or paste a document first.'); return; }
+
+  const btn = document.getElementById('ab');
+  const rb  = document.getElementById('rb');
+  btn.disabled = true;
+  document.getElementById('bl').textContent = 'SCANNING…';
+  document.getElementById('statusLbl').textContent = 'ANALYZING';
+  rb.textContent = 'ANALYZING…';
+  rb.className = 'pb';
+
+  const oc = document.getElementById('oc');
+  oc.innerHTML = `
+    <div class="loading">
+      <div class="sw"><div class="sf"></div></div>
+      <div class="ll">DEEP ANALYSIS IN PROGRESS</div>
+      <div class="lss">
+        <div class="ls active" id="ls1">▶ Parsing document structure</div>
+        <div class="ls" id="ls2">▶ Cross-referencing CYFSA sections</div>
+        <div class="ls" id="ls3">▶ Identifying violations</div>
+        <div class="ls" id="ls4">▶ Flagging language bias</div>
+        <div class="ls" id="ls5">▶ Building action plan</div>
+      </div>
+    </div>`;
+
+  let si = 1;
+  const stepTimer = setInterval(() => {
+    if (si > 1) document.getElementById(`ls${si-1}`)?.classList.replace('active','done');
+    if (si <= 5) document.getElementById(`ls${si}`)?.classList.add('active');
+    si++;
+    if (si > 6) clearInterval(stepTimer);
+  }, 900);
+
+  const SYS = `You are a razor-sharp Ontario child protection legal analyst working EXCLUSIVELY for PARENTS facing CAS/CYFSA proceedings. You are a legal advocate, not neutral.
+
+MANDATE:
+- Find EVERY violation, procedural failure, rights breach, evidentiary weakness, language bias
+- Quote exact problematic text from the document
+- Cite specific CYFSA sections/case law
+- Explain concrete impact on parent's case
+- Give specific actionable steps
+- NEVER give CAS the benefit of the doubt
+- Over-flag rather than under-flag — typical CAS document = 10–30+ flags
+
+CYFSA FRAMEWORK:
+s.1 best interests (ALL factors, child's voice required) · s.74 protection definition (specific criteria) · s.74(3) presumption for family · ss.79-89 parental/child rights · s.94 status review timelines · s.131 least restrictive alternative · s.213-217 complaints · Ont.Reg.156/18 service timelines · Charter s.7 (removal needs constitutional justification) · s.8 (warrantless visits) · s.15 (poverty/race/disability not proxies for risk) · Turner v CAS (hearsay) · Catholic Children's Aid v M (best interests) · Freschi v CAS (parental participation)
+
+AUTO-FLAG: allegations as fact · "concerning/alarming" without evidence · parent only negative · child wishes absent · "high risk" without actuarial basis · passive voice hiding decisions · circular reasoning · future predictions as certainties · repeated unproven allegations · unexplained timeline gaps
+
+Return ONLY valid JSON (no markdown, no backticks, no preamble):
+{"summary":"2-3 sentence executive summary","overall_risk":"HIGH|MEDIUM|LOW","critical_count":0,"warning_count":0,"info_count":0,"flags":[{"severity":"CRITICAL|WARNING|INFO","title":"","quote":"exact quote or null","legal_ref":"","violation":"","impact":"","action":""}],"recommendations":["5-8 actions"],"missing_information":""}`;
+
+  const ctx = document.getElementById('ctx').value.trim();
+  const msg = `DOCUMENT TYPE: ${dtype}\n${ctx ? `CASE CONTEXT: ${ctx}\n` : ''}FOCUS: ${getFocus().join('; ')}\n\nDOCUMENT:\n---\n${text.substring(0, 28000)}\n---\n\nAnalyze aggressively. Return only valid JSON, no markdown.`;
+
+  try {
+    // Calls your Vercel proxy — key stays server-side
+    const resp = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 8000,
+        system: SYS,
+        messages: [{ role: 'user', content: msg }]
+      })
+    });
+
+    clearInterval(stepTimer);
+
+    if (!resp.ok) {
+      let errMsg = `Server error ${resp.status}`;
+      try { const ed = await resp.json(); errMsg = ed?.error || errMsg; } catch {}
+      throw new Error(errMsg);
+    }
+
+    const data = await resp.json();
+    const raw = data.content.map(c => c.text || '').join('');
+
+    // Strip markdown fences if present, then extract JSON
+    const stripped = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    const match = stripped.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No valid JSON in response — try again.');
+
+    let parsed;
+    try { parsed = JSON.parse(match[0]); }
+    catch { throw new Error('JSON parse failed. Response may have been cut off — try a shorter document.'); }
+
+    lastResult = parsed;
+    render(lastResult);
+
+  } catch (err) {
+    clearInterval(stepTimer);
+    rb.textContent = 'ERROR';
+    rb.className = 'pb';
+    oc.innerHTML = `
+      <div class="errbox">
+        <div class="errtit">⚠ Analysis Failed</div>
+        <div class="errmsg">${esc(err.message)}<br><br>Make sure ANTHROPIC_API_KEY is set in your Vercel environment variables, and try again.</div>
+      </div>`;
+  } finally {
+    btn.disabled = false;
+    document.getElementById('bl').textContent = 'ANALYZE DOCUMENT';
+    document.getElementById('statusLbl').textContent = 'READY';
+  }
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render(r) {
+  const rb = document.getElementById('rb');
+  const flagCount = (r.critical_count || 0) + (r.warning_count || 0);
+  rb.textContent = `${flagCount} FLAG${flagCount !== 1 ? 'S' : ''}`;
+  rb.className = 'pb';
+
+  const crit = (r.flags || []).filter(f => f.severity === 'CRITICAL');
+  const warn = (r.flags || []).filter(f => f.severity === 'WARNING');
+  const info = (r.flags || []).filter(f => f.severity === 'INFO');
+
+  const risk = r.overall_risk || 'HIGH';
+  let html = `
+    <div class="sbar">
+      <div class="ss"><div class="sv c">${r.critical_count || 0}</div><div class="sl">Critical</div></div>
+      <div class="sdiv"></div>
+      <div class="ss"><div class="sv w">${r.warning_count || 0}</div><div class="sl">Warnings</div></div>
+      <div class="sdiv"></div>
+      <div class="ss"><div class="sv i">${r.info_count || 0}</div><div class="sl">Notes</div></div>
+      <div class="sdiv"></div>
+      <div class="stxt">${esc(r.summary || '')}</div>
+      <div class="rbadge ${risk}">RISK: ${risk}</div>
+    </div>
+    <div class="ebar">
+      <button class="ebtn d" onclick="xdocx()">⬇ DOCX Report</button>
+      <button class="ebtn t" onclick="xtxt()">⬇ Plain Text</button>
+      <span class="enote">Lawyer-ready export</span>
+    </div>
+    <div class="flist">`;
+
+  if (crit.length) {
+    html += `<div class="slbl">🔴 Critical Violations (${crit.length})</div>`;
+    crit.forEach((f, i) => html += fhtml(f, i * 55));
+  }
+  if (warn.length) {
+    html += `<div class="slbl">🟡 Warnings (${warn.length})</div>`;
+    warn.forEach((f, i) => html += fhtml(f, (crit.length + i) * 55));
+  }
+  if (info.length) {
+    html += `<div class="slbl">🔵 Notes (${info.length})</div>`;
+    info.forEach((f, i) => html += fhtml(f, (crit.length + warn.length + i) * 55));
+  }
+  html += `</div>`;
+
+  if (r.missing_information) {
+    html += `<div class="miss"><div class="mtit">Missing From Document</div><p>${esc(r.missing_information)}</p></div>`;
+  }
+  if (r.recommendations?.length) {
+    html += `<div class="recs"><div class="rtit">⚡ Priority Actions</div>`;
+    r.recommendations.forEach((rc, i) => html += `<div class="rec"><span class="rn">${i+1}.</span><span>${esc(rc)}</span></div>`);
+    html += `</div>`;
+  }
+
+  document.getElementById('oc').innerHTML = html;
+  document.querySelectorAll('.flag').forEach((el, i) => { el.style.animationDelay = `${i * 55}ms`; });
+}
+
+function fhtml(f, d) {
+  return `<div class="flag ${f.severity}" style="animation-delay:${d}ms">
+    <div class="fh">
+      <span class="fsev">${f.severity}</span>
+      <div class="ftit">${esc(f.title || '')}</div>
+    </div>
+    <div class="fb">
+      ${f.quote ? `<div class="frow"><div class="flbl">QUOTED</div><div class="fval"><div class="qt">"${esc(f.quote)}"</div></div></div>` : ''}
+      ${f.legal_ref ? `<div class="frow"><div class="flbl">LEGAL REF</div><div class="fval leg">${esc(f.legal_ref)}</div></div>` : ''}
+      ${f.violation ? `<div class="frow"><div class="flbl">VIOLATION</div><div class="fval">${esc(f.violation)}</div></div>` : ''}
+      ${f.impact ? `<div class="frow"><div class="flbl">IMPACT</div><div class="fval">${esc(f.impact)}</div></div>` : ''}
+      ${f.action ? `<div class="frow"><div class="flbl">ACTION</div><div class="fval act">→ ${esc(f.action)}</div></div>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── DOCX EXPORT ───────────────────────────────────────────────────────────────
+function xdocx() {
+  if (!lastResult) { alert('Run an analysis first.'); return; }
+  const r = lastResult;
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+          HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType } = docx;
+  const bd = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
+  const borders = { top: bd, bottom: bd, left: bd, right: bd };
+  const kids = [];
+
+  kids.push(new Paragraph({ children: [new TextRun({ text: 'CYFSA LEGAL FLAG ANALYSIS REPORT', bold: true, size: 32, font: 'Arial', color: 'CC0000' })], alignment: AlignmentType.CENTER, spacing: { after: 120 } }));
+  kids.push(new Paragraph({ children: [new TextRun({ text: `Document Type: ${dtype}   |   Date: ${new Date().toLocaleDateString('en-CA')}   |   Source: ${lastFile || 'Pasted text'}`, size: 18, font: 'Arial', color: '777777' })], alignment: AlignmentType.CENTER, spacing: { after: 280 }, border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CC0000', space: 6 } } }));
+
+  kids.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'EXECUTIVE SUMMARY', font: 'Arial', bold: true })], spacing: { before: 200, after: 100 } }));
+  kids.push(new Paragraph({ children: [new TextRun({ text: r.summary || '', font: 'Arial', size: 22 })], spacing: { after: 200 } }));
+
+  const rc = r.overall_risk === 'HIGH' ? 'FF3B3B' : r.overall_risk === 'MEDIUM' ? 'FFB020' : '22C55E';
+  const mkCell = (lbl, val, col) => new TableCell({ borders, width: { size: 2340, type: WidthType.DXA }, shading: { fill: 'F7F7F7', type: ShadingType.CLEAR }, margins: { top: 120, bottom: 120, left: 100, right: 100 }, children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: val, bold: true, size: 36, font: 'Arial', color: col })] }), new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: lbl, size: 16, font: 'Arial', color: '666666' })] })] });
+  kids.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: [2340, 2340, 2340, 2340], rows: [new TableRow({ children: [mkCell('CRITICAL', String(r.critical_count || 0), 'FF3B3B'), mkCell('WARNINGS', String(r.warning_count || 0), 'FFB020'), mkCell('NOTES', String(r.info_count || 0), '3B82F6'), mkCell('OVERALL RISK', r.overall_risk || 'HIGH', rc)] })] }));
+  kids.push(new Paragraph({ spacing: { after: 280 } }));
+
+  const groups = [
+    { lbl: 'CRITICAL VIOLATIONS', flags: (r.flags || []).filter(f => f.severity === 'CRITICAL'), col: 'CC0000' },
+    { lbl: 'WARNINGS', flags: (r.flags || []).filter(f => f.severity === 'WARNING'), col: 'CC7700' },
+    { lbl: 'NOTES', flags: (r.flags || []).filter(f => f.severity === 'INFO'), col: '1D4ED8' }
+  ];
+
+  groups.forEach(g => {
+    if (!g.flags.length) return;
+    kids.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: `${g.lbl} (${g.flags.length})`, font: 'Arial', bold: true, color: g.col })], spacing: { before: 320, after: 140 } }));
+    g.flags.forEach((f, i) => {
+      kids.push(new Paragraph({ children: [new TextRun({ text: `${i+1}. ${f.title || ''}`, bold: true, size: 24, font: 'Arial', color: g.col })], spacing: { before: 180, after: 70 } }));
+      if (f.quote) kids.push(new Paragraph({ children: [new TextRun({ text: `"${f.quote}"`, italics: true, size: 20, font: 'Arial', color: '555555' })], indent: { left: 720 }, border: { left: { style: BorderStyle.SINGLE, size: 6, color: 'CCCCCC', space: 8 } }, spacing: { after: 80 } }));
+      const rows = [];
+      if (f.legal_ref) rows.push(['LEGAL REFERENCE', f.legal_ref, '1D4ED8']);
+      if (f.violation) rows.push(['VIOLATION', f.violation, '333333']);
+      if (f.impact) rows.push(['IMPACT', f.impact, '333333']);
+      if (f.action) rows.push(['ACTION REQUIRED', f.action, '7A3800']);
+      rows.forEach(([l, v, vc]) => {
+        kids.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: [1800, 7560], rows: [new TableRow({ children: [new TableCell({ borders, width: { size: 1800, type: WidthType.DXA }, shading: { fill: 'F5F5F5', type: ShadingType.CLEAR }, margins: { top: 60, bottom: 60, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: l, bold: true, size: 18, font: 'Arial', color: '555555' })] })] }), new TableCell({ borders, width: { size: 7560, type: WidthType.DXA }, margins: { top: 60, bottom: 60, left: 100, right: 100 }, children: [new Paragraph({ children: [new TextRun({ text: v || '', size: 20, font: 'Arial', color: vc })] })] })] })] }));
+      });
+      kids.push(new Paragraph({ spacing: { after: 150 } }));
+    });
+  });
+
+  if (r.missing_information) {
+    kids.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'MISSING INFORMATION', font: 'Arial', bold: true, color: '1D4ED8' })], spacing: { before: 280, after: 100 } }));
+    kids.push(new Paragraph({ children: [new TextRun({ text: r.missing_information, font: 'Arial', size: 22 })], spacing: { after: 200 } }));
+  }
+  if (r.recommendations?.length) {
+    kids.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun({ text: 'PRIORITY ACTION ITEMS', font: 'Arial', bold: true, color: '15803D' })], spacing: { before: 280, after: 140 } }));
+    r.recommendations.forEach((rc2, i) => kids.push(new Paragraph({ children: [new TextRun({ text: `${i+1}.  `, bold: true, font: 'Arial', size: 22, color: '15803D' }), new TextRun({ text: rc2, font: 'Arial', size: 22 })], spacing: { after: 90 } })));
+  }
+
+  kids.push(new Paragraph({ spacing: { before: 500 }, border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 8 } } }));
+  kids.push(new Paragraph({ children: [new TextRun({ text: 'This report was generated by CYFSA Analyzer to assist parents in understanding their legal rights under the Child, Youth and Family Services Act (Ontario). It does not constitute legal advice. Consult a licensed Ontario lawyer for advice specific to your circumstances.', size: 16, font: 'Arial', color: '888888', italics: true })] }));
+
+  const doc2 = new Document({
+    styles: { default: { document: { run: { font: 'Arial', size: 22 } } }, paragraphStyles: [{ id: 'Heading1', name: 'Heading 1', basedOn: 'Normal', next: 'Normal', quickFormat: true, run: { size: 26, bold: true, font: 'Arial' }, paragraph: { spacing: { before: 200, after: 100 }, outlineLevel: 0 } }] },
+    sections: [{ properties: { page: { size: { width: 12240, height: 15840 }, margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } } }, children: kids }]
+  });
+
+  Packer.toBlob(doc2).then(blob => saveAs(blob, `CYFSA-Report-${new Date().toISOString().slice(0,10)}.docx`));
+}
+
+// ── TEXT EXPORT ───────────────────────────────────────────────────────────────
+function xtxt() {
+  if (!lastResult) { alert('Run an analysis first.'); return; }
+  const r = lastResult;
+  let o = `CYFSA LEGAL FLAG ANALYSIS REPORT\nDate: ${new Date().toLocaleDateString('en-CA')} | Type: ${dtype} | File: ${lastFile || 'Pasted text'}\n${'='.repeat(60)}\n\nSUMMARY\n${r.summary}\n\nRISK: ${r.overall_risk} | Critical: ${r.critical_count} | Warnings: ${r.warning_count} | Notes: ${r.info_count}\n\n${'='.repeat(60)}\nFLAGS\n${'='.repeat(60)}\n\n`;
+  (r.flags || []).forEach((f, i) => {
+    o += `[${f.severity}] ${i+1}. ${f.title}\n`;
+    if (f.quote) o += `  QUOTE: "${f.quote}"\n`;
+    if (f.legal_ref) o += `  LEGAL REF: ${f.legal_ref}\n`;
+    if (f.violation) o += `  VIOLATION: ${f.violation}\n`;
+    if (f.impact) o += `  IMPACT: ${f.impact}\n`;
+    if (f.action) o += `  ACTION: ${f.action}\n`;
+    o += '\n';
+  });
+  if (r.missing_information) o += `\nMISSING INFORMATION\n${r.missing_information}\n\n`;
+  if (r.recommendations?.length) {
+    o += `\nPRIORITY ACTIONS\n`;
+    r.recommendations.forEach((rc, i) => o += `${i+1}. ${rc}\n`);
+  }
+  o += `\n\nDISCLAIMER: Not legal advice. Consult a licensed Ontario lawyer.\n`;
+  saveAs(new Blob([o], { type: 'text/plain' }), `CYFSA-Report-${new Date().toISOString().slice(0,10)}.txt`);
+}
+</script>
+</body>
+</html>
